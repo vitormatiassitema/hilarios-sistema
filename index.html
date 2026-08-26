@@ -722,7 +722,7 @@
 
     <div id="adminAuthed" class="hidden">
       <div class="admin-topbar">
-        <div class="demo-note" style="margin-bottom:0; flex:1;">Modo de demonstração — login local deste navegador. Os dados continuam salvos apenas aqui.</div>
+        <div class="demo-note" style="margin-bottom:0; flex:1;">Modo de demonstração — login local deste navegador, não substitui um sistema de autenticação real. Os dados (serviços, clientes, produtos etc.) ficam salvos na nuvem e sincronizam entre aparelhos.</div>
         <button class="link-btn" id="btnAdminLogout" type="button">Sair</button>
       </div>
       <nav class="admin-tabs">
@@ -988,6 +988,7 @@
 
   function saveState(st){
     try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(st)); }catch(e){}
+    if(window.__cloudSync) window.__cloudSync.save(st);
   }
 
   var state = loadState();
@@ -1058,7 +1059,26 @@
   }
   function fileToDataUrl(file, cb){
     var reader = new FileReader();
-    reader.onload = function(e){ cb(e.target.result); };
+    reader.onload = function(e){
+      var img = new Image();
+      img.onload = function(){
+        var maxDim = 900;
+        var w = img.width, h = img.height;
+        if(w > maxDim || h > maxDim){
+          if(w > h){ h = Math.round(h * maxDim / w); w = maxDim; }
+          else { w = Math.round(w * maxDim / h); h = maxDim; }
+        }
+        try{
+          var canvas = document.createElement("canvas");
+          canvas.width = w; canvas.height = h;
+          var ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, w, h);
+          cb(canvas.toDataURL("image/jpeg", 0.82));
+        }catch(err){ cb(e.target.result); }
+      };
+      img.onerror = function(){ cb(e.target.result); };
+      img.src = e.target.result;
+    };
     reader.readAsDataURL(file);
   }
   function buildReminderMessage(appt, kind){
@@ -2080,5 +2100,64 @@
   }
 
   renderAll();
+
+  // ---------- cloud sync (Firebase) ----------
+  // Pulls the latest saved state from the cloud once, on open, so every
+  // device/browser starts from the same data. Every saveState() call already
+  // pushes up to the cloud (see saveState above) — this only handles the
+  // "coming in" direction.
+  function trySyncFromCloud(){
+    if(!(window.__cloudSync && window.__cloudSync.ready)) return;
+    window.__cloudSync.load().then(function(remote){
+      if(remote){
+        state = remote;
+        try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
+        renderAll();
+      }
+    });
+  }
+  if(window.__cloudSync && window.__cloudSync.ready) trySyncFromCloud();
+  else window.addEventListener("cloudSyncReady", trySyncFromCloud, {once:true});
 })();
+</script>
+
+<script type="module">
+  // Cloud database (Firebase) — keeps products, serviços, clientes, planos e
+  // agendamentos sincronizados entre todos os aparelhos que abrirem este link.
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+  import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+  var firebaseConfig = {
+    apiKey: "AIzaSyBdID6YGgasQkR9puVy0rhXX4ZjTJ2LFCY",
+    authDomain: "barber-83675.firebaseapp.com",
+    projectId: "barber-83675",
+    storageBucket: "barber-83675.firebasestorage.app",
+    messagingSenderId: "195166875925",
+    appId: "1:195166875925:web:9057d50c1daa6b91b7391c",
+    measurementId: "G-EVGL1HBWRV"
+  };
+
+  try{
+    var fbApp = initializeApp(firebaseConfig);
+    var db = getFirestore(fbApp);
+    var stateRef = doc(db, "hilarios", "state");
+
+    window.__cloudSync = {
+      ready: true,
+      load: function(){
+        return getDoc(stateRef).then(function(snap){
+          return snap.exists() ? snap.data().payload : null;
+        }).catch(function(e){ console.warn("cloud load failed", e); return null; });
+      },
+      save: function(stateObj){
+        return setDoc(stateRef, { payload: stateObj, updatedAt: Date.now() }).catch(function(e){
+          console.warn("cloud save failed", e);
+        });
+      }
+    };
+  }catch(e){
+    console.warn("Firebase init failed", e);
+    window.__cloudSync = null;
+  }
+  window.dispatchEvent(new Event("cloudSyncReady"));
 </script>
