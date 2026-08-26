@@ -1058,22 +1058,40 @@
     return "Olá! Tenho interesse neste produto da HILARIOS (" + currency(p.price) + "). Ainda está disponível?";
   }
   function fileToDataUrl(file, cb){
+    var MAX_BYTES = 700000; // keep each photo well under Firestore's 1MB per-document limit
     var reader = new FileReader();
     reader.onload = function(e){
       var img = new Image();
       img.onload = function(){
-        var maxDim = 900;
-        var w = img.width, h = img.height;
-        if(w > maxDim || h > maxDim){
-          if(w > h){ h = Math.round(h * maxDim / w); w = maxDim; }
-          else { w = Math.round(w * maxDim / h); h = maxDim; }
-        }
         try{
+          var maxDim = 900;
+          var w = img.width, h = img.height;
+          if(w > maxDim || h > maxDim){
+            if(w > h){ h = Math.round(h * maxDim / w); w = maxDim; }
+            else { w = Math.round(w * maxDim / h); h = maxDim; }
+          }
           var canvas = document.createElement("canvas");
-          canvas.width = w; canvas.height = h;
           var ctx = canvas.getContext("2d");
-          ctx.drawImage(img, 0, 0, w, h);
-          cb(canvas.toDataURL("image/jpeg", 0.82));
+          function render(width, height){
+            canvas.width = width; canvas.height = height;
+            ctx.drawImage(img, 0, 0, width, height);
+          }
+          render(w, h);
+          var quality = 0.82;
+          var dataUrl = canvas.toDataURL("image/jpeg", quality);
+          var attempts = 0;
+          while(dataUrl.length > MAX_BYTES && attempts < 8){
+            if(quality > 0.35){
+              quality -= 0.12;
+            } else {
+              w = Math.round(w * 0.8); h = Math.round(h * 0.8);
+              render(w, h);
+              quality = 0.6;
+            }
+            dataUrl = canvas.toDataURL("image/jpeg", quality);
+            attempts++;
+          }
+          cb(dataUrl);
         }catch(err){ cb(e.target.result); }
       };
       img.onerror = function(){ cb(e.target.result); };
@@ -2125,7 +2143,7 @@
   // Cloud database (Firebase) — keeps products, serviços, clientes, planos e
   // agendamentos sincronizados entre todos os aparelhos que abrirem este link.
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-  import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+  import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
   var firebaseConfig = {
     apiKey: "AIzaSyBdID6YGgasQkR9puVy0rhXX4ZjTJ2LFCY",
@@ -2141,18 +2159,55 @@
     var fbApp = initializeApp(firebaseConfig);
     var db = getFirestore(fbApp);
     var stateRef = doc(db, "hilarios", "state");
+    // Product photos are stored as their own documents (one per product) instead
+    // of inline in the main state document — Firestore caps a single document at
+    // 1MB, and a handful of product photos embedded together blew past that.
+    var photosCol = collection(db, "hilarios_photos");
 
     window.__cloudSync = {
       ready: true,
       load: function(){
         return getDoc(stateRef).then(function(snap){
-          return snap.exists() ? snap.data().payload : null;
+          if(!snap.exists()) return null;
+          var payload = snap.data().payload;
+          if(!payload) return null;
+          return getDocs(photosCol).then(function(photoSnap){
+            var photoMap = {};
+            photoSnap.forEach(function(d){ photoMap[d.id] = d.data().photo; });
+            (payload.products || []).forEach(function(p){
+              if(photoMap[p.id]) p.photo = photoMap[p.id];
+            });
+            return payload;
+          });
         }).catch(function(e){ console.warn("cloud load failed", e); return null; });
       },
       save: function(stateObj){
-        return setDoc(stateRef, { payload: stateObj, updatedAt: Date.now() }).catch(function(e){
+        try{
+          var stateCopy = JSON.parse(JSON.stringify(stateObj));
+          var photoMap = {};
+          (stateCopy.products || []).forEach(function(p){
+            if(p.photo){ photoMap[p.id] = p.photo; delete p.photo; }
+          });
+          var writes = [ setDoc(stateRef, { payload: stateCopy, updatedAt: Date.now() }) ];
+          Object.keys(photoMap).forEach(function(id){
+            writes.push(setDoc(doc(photosCol, id), { photo: photoMap[id] }));
+          });
+          return Promise.all(writes).then(function(){
+            // Clean up photo docs for products that were deleted or edited-away.
+            return getDocs(photosCol);
+          }).then(function(photoSnap){
+            var deletions = [];
+            photoSnap.forEach(function(d){
+              if(!photoMap[d.id]) deletions.push(deleteDoc(d.ref));
+            });
+            return Promise.all(deletions);
+          }).catch(function(e){
+            console.warn("cloud save failed", e);
+          });
+        }catch(e){
           console.warn("cloud save failed", e);
-        });
+          return Promise.resolve();
+        }
       }
     };
   }catch(e){
