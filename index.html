@@ -95,6 +95,8 @@
 
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
+  html{scroll-behavior:smooth;}
+  @media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto;} }
   body{
     background:var(--bg);
     color:var(--ink);
@@ -201,6 +203,29 @@
 
   .view.hidden{display:none;}
   .hidden{display:none;}
+
+  /* ---------- client hero ---------- */
+  .client-hero{
+    padding:36px 4px 30px;
+    margin-bottom:8px;
+    border-bottom:1px solid var(--line);
+  }
+  .hero-eyebrow{
+    display:inline-flex; align-items:center; gap:10px;
+    font-family:var(--font-mono); font-size:0.72rem; letter-spacing:0.12em; text-transform:uppercase;
+    color:var(--brass-strong); margin-bottom:14px;
+  }
+  .hero-eyebrow::before{content:""; width:22px; height:1px; background:var(--brass);}
+  .hero-heading{
+    font-size:clamp(1.6rem, 4vw, 2.3rem); max-width:19ch; margin-bottom:14px;
+  }
+  .hero-heading em{color:var(--brass-strong); font-style:normal;}
+  .hero-lead{font-size:0.95rem; color:var(--ink-soft); max-width:46ch; line-height:1.6; margin-bottom:22px;}
+  .hero-cta{display:inline-flex; align-items:center; gap:8px;}
+  @media (max-width:520px){
+    .client-hero{padding:24px 2px 22px;}
+    .watermark-mark{opacity:0.045;}
+  }
 
   /* ---------- step cards ---------- */
   .step{
@@ -592,6 +617,14 @@
 
   <!-- ===================== CLIENT VIEW ===================== -->
   <main id="clientView" class="view">
+    <div class="client-hero">
+      <div class="hero-eyebrow">Bem-vindo(a)</div>
+      <h1 class="hero-heading">Seu próximo <em>grande corte</em> começa aqui.</h1>
+      <p class="hero-lead">Agende em poucos passos: escolha o serviço, o profissional e o horário que funciona pra você.</p>
+      <a href="#serviceGrid" class="btn btn-primary hero-cta">Agendar agora
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </a>
+    </div>
     <nav class="client-tabs">
       <button class="client-tab active" data-ctab="booking">Agendar horário</button>
       <button class="client-tab" data-ctab="products">Produtos à Venda</button>
