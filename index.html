@@ -469,6 +469,17 @@
   .day-toggle.on{background:var(--brass); color:#fff9ec; border-color:var(--brass);}
   .day-toggle.on:hover{box-shadow:0 0 0 3px rgba(var(--brass-rgb), 0.28); transform:translateY(-1px);}
 
+  .blocked-dates-list{margin-top:10px; display:flex; flex-wrap:wrap;}
+  .blocked-date-pill{
+    display:inline-flex; align-items:center; gap:6px; background:var(--bg-sunken); border:1px solid var(--line);
+    border-radius:999px; padding:4px 6px 4px 10px; font-size:0.78rem; color:var(--ink-soft); margin:4px 6px 0 0;
+  }
+  .blocked-date-pill button{
+    background:none; border:none; color:var(--danger); cursor:pointer; font-weight:700; font-size:0.9rem;
+    line-height:1; padding:2px 4px; border-radius:50%; transition:background-color 0.2s ease;
+  }
+  .blocked-date-pill button:hover{background:var(--danger-tint);}
+
   .demo-note{font-size:0.78rem; color:var(--ink-faint); background:var(--bg-sunken); border:1px solid var(--line); border-radius:8px; padding:10px 14px; margin-bottom:18px;}
 
   .toast{
@@ -479,6 +490,23 @@
   :root[data-theme="dark"] .toast{background:var(--bg-elevated); color:var(--ink); border:1px solid var(--line-strong);}
   @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .toast{background:var(--bg-elevated); color:var(--ink); border:1px solid var(--line-strong);} }
   .toast.hidden{opacity:0; pointer-events:none; transform:translate(-50%, 8px);}
+
+  /* confirm modal — a custom dialog instead of window.confirm(), which some
+     in-app browsers (e.g. links opened inside WhatsApp/Instagram) silently
+     block or auto-dismiss, making a destructive action look like it "did
+     nothing" when clicked from those webviews. */
+  .confirm-overlay{
+    position:fixed; inset:0; background:rgba(20,15,8,0.5); display:flex; align-items:center; justify-content:center;
+    z-index:100; padding:20px; opacity:0; pointer-events:none; transition:opacity 0.15s ease;
+  }
+  .confirm-overlay.open{opacity:1; pointer-events:auto;}
+  .confirm-box{
+    background:var(--bg-elevated); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow);
+    max-width:380px; width:100%; padding:22px; transform:translateY(6px); transition:transform 0.15s ease;
+  }
+  .confirm-overlay.open .confirm-box{transform:translateY(0);}
+  .confirm-box p{margin:0 0 20px; font-size:0.92rem; line-height:1.5; color:var(--ink);}
+  .confirm-box .confirm-actions{display:flex; justify-content:flex-end; gap:10px;}
 
   .empty-state{color:var(--ink-faint); font-size:0.88rem; padding:20px; text-align:center; grid-column:1/-1;}
 
@@ -783,6 +811,13 @@
       </section>
 
       <section class="admin-panel hidden" id="panel-agenda">
+        <div class="agenda-toolbar" style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:16px;">
+          <div class="field" style="flex:0 0 auto;">
+            <label for="adminJumpDate" style="font-size:0.72rem;">Ir para uma data específica</label>
+            <input type="date" id="adminJumpDate" style="padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink);">
+          </div>
+          <button type="button" class="btn btn-ghost btn-small" id="btnExportCsv" style="margin-top:20px;">Exportar tudo (CSV)</button>
+        </div>
         <div class="date-row" id="adminDateRow" style="margin-bottom:16px;"></div>
         <div id="agendaContent"></div>
       </section>
@@ -902,6 +937,16 @@
 
 <div class="toast hidden" id="toast"></div>
 
+<div class="confirm-overlay" id="confirmOverlay" role="alertdialog" aria-modal="true" aria-describedby="confirmMsg">
+  <div class="confirm-box">
+    <p id="confirmMsg"></p>
+    <div class="confirm-actions">
+      <button type="button" class="btn btn-ghost btn-small" id="confirmCancelBtn">Cancelar</button>
+      <button type="button" class="btn btn-primary btn-small" id="confirmOkBtn">Confirmar</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function(){
   "use strict";
@@ -964,9 +1009,9 @@
         {id:"s6", name:"Combo Completo", duration:75, price:90, description:"Corte, barba e sobrancelha"}
       ],
       barbers: [
-        {id:"b1", name:"Ricardo Silva", specialty:"Especialista em degradê", workDays:[2,3,4,5,6], start:"09:00", end:"19:00", lunchStart:"12:00", lunchEnd:"13:00"},
-        {id:"b2", name:"Junior Alves", specialty:"Barba terapia", workDays:[2,3,4,5,6], start:"10:00", end:"20:00", lunchStart:"13:00", lunchEnd:"13:30"},
-        {id:"b3", name:"Diego Costa", specialty:"Cortes clássicos", workDays:[3,4,5,6,0], start:"09:00", end:"18:00", lunchStart:"12:30", lunchEnd:"13:30"}
+        {id:"b1", name:"Ricardo Silva", specialty:"Especialista em degradê", workDays:[2,3,4,5,6], start:"09:00", end:"19:00", lunchStart:"12:00", lunchEnd:"13:00", blockedDates:[]},
+        {id:"b2", name:"Junior Alves", specialty:"Barba terapia", workDays:[2,3,4,5,6], start:"10:00", end:"20:00", lunchStart:"13:00", lunchEnd:"13:30", blockedDates:[]},
+        {id:"b3", name:"Diego Costa", specialty:"Cortes clássicos", workDays:[3,4,5,6,0], start:"09:00", end:"18:00", lunchStart:"12:30", lunchEnd:"13:30", blockedDates:[]}
       ],
       plans: [
         {id:"plan_semestral", name:"Plano Semestral", period:"Semestral", months:6, price:239,
@@ -997,6 +1042,7 @@
           if(!parsed.plans) parsed.plans = defaultState().plans;
           if(!parsed.clients) parsed.clients = defaultState().clients;
           if(!parsed.products) parsed.products = [];
+          (parsed.barbers||[]).forEach(function(b){ if(!b.blockedDates) b.blockedDates = []; });
           return parsed;
         }
       }
@@ -1050,6 +1096,40 @@
     toast._t = setTimeout(function(){ el.classList.add("hidden"); }, 2600);
   }
 
+  // ---------- confirm modal ----------
+  // Replaces window.confirm(): some in-app browsers (links opened from
+  // WhatsApp, Instagram, etc.) silently block or auto-dismiss native
+  // confirm() dialogs, which made "Cancelar"/"Excluir" look broken — the
+  // click did nothing because the code below it never ran. This dialog is
+  // drawn by the page itself, so it always shows.
+  var confirmOverlayEl = document.getElementById("confirmOverlay");
+  var confirmMsgEl = document.getElementById("confirmMsg");
+  var confirmOkBtn = document.getElementById("confirmOkBtn");
+  var confirmCancelBtn = document.getElementById("confirmCancelBtn");
+  var confirmPending = null;
+  function showConfirm(message, onConfirm){
+    confirmMsgEl.textContent = message;
+    confirmPending = onConfirm;
+    confirmOverlayEl.classList.add("open");
+    confirmOkBtn.focus();
+  }
+  function closeConfirm(){
+    confirmOverlayEl.classList.remove("open");
+    confirmPending = null;
+  }
+  confirmOkBtn.addEventListener("click", function(){
+    var fn = confirmPending;
+    closeConfirm();
+    if(fn) fn();
+  });
+  confirmCancelBtn.addEventListener("click", closeConfirm);
+  confirmOverlayEl.addEventListener("click", function(e){ if(e.target === confirmOverlayEl) closeConfirm(); });
+  document.addEventListener("keydown", function(e){
+    if(!confirmOverlayEl.classList.contains("open")) return;
+    if(e.key === "Escape") closeConfirm();
+    else if(e.key === "Enter"){ var fn = confirmPending; closeConfirm(); if(fn) fn(); }
+  });
+
   function toDigits(s){ return String(s||"").replace(/\D/g,""); }
   function waNumber(phone){
     var d = toDigits(phone);
@@ -1057,10 +1137,10 @@
     if(d.length<=11) d = "55"+d; // assume a Brazilian number given without country code
     return d;
   }
-  function buildBookingMessage(appt){
+  function buildBookingMessage(appt, isReschedule){
     var s = serviceById(appt.serviceId), b = barberById(appt.barberId);
     var dateLabel = new Date(appt.date+"T00:00:00").toLocaleDateString("pt-BR", {day:"2-digit", month:"long"});
-    return "Novo agendamento na HILARIOS\n" +
+    return (isReschedule ? "Agendamento remarcado na HILARIOS" : "Novo agendamento na HILARIOS") + "\n" +
       "Cliente: "+appt.customerName+" ("+appt.customerPhone+")\n" +
       "Serviço: "+(s?s.name:"—")+"\n" +
       "Profissional: "+(b?b.name:"—")+"\n" +
@@ -1146,6 +1226,7 @@
 
   // ---------- client selection state ----------
   var sel = { serviceId:null, barberId:null, date:null, time:null };
+  var reschedulingId = null; // set while the client is picking a new date/time to reschedule an existing appointment
 
   function renderServiceGrid(){
     var grid = document.getElementById("serviceGrid");
@@ -1197,7 +1278,7 @@
     for(var i=0;i<14;i++){
       var d = new Date(); d.setDate(d.getDate()+i);
       var ds = fmtDate(d);
-      var disabled = barber ? barber.workDays.indexOf(d.getDay())===-1 : false;
+      var disabled = barber ? (barber.workDays.indexOf(d.getDay())===-1 || (barber.blockedDates||[]).indexOf(ds)!==-1) : false;
       var chip = document.createElement("button");
       chip.type = "button";
       chip.className = "date-chip" + (sel.date===ds?" selected":"") + (disabled?" disabled":"");
@@ -1246,6 +1327,10 @@
     var service = serviceById(sel.serviceId);
     if(barber.workDays.indexOf(new Date(sel.date+"T00:00:00").getDay())===-1){
       grid.innerHTML = '<div class="empty-note">'+esc(barber.name)+' não atende neste dia. Escolha outra data.</div>';
+      return;
+    }
+    if((barber.blockedDates||[]).indexOf(sel.date)!==-1){
+      grid.innerHTML = '<div class="empty-note">'+esc(barber.name)+' está de folga nesse dia. Escolha outra data.</div>';
       return;
     }
     var workStart = timeToMin(barber.start), workEnd = timeToMin(barber.end);
@@ -1345,13 +1430,32 @@
         '<span class="appt-meta">'+esc(b?b.name:"—")+' · '+dateLabel+' às '+a.time+'</span></div>'+
         '<div style="display:flex; align-items:center; gap:10px;"><span class="pill pill-'+a.status+'">'+labelStatus(a.status)+'</span></div>';
       if(a.status==="confirmado"){
+        var rescheduleBtn = document.createElement("button");
+        rescheduleBtn.className = "btn btn-ghost btn-small";
+        rescheduleBtn.textContent = "Remarcar";
+        rescheduleBtn.addEventListener("click", function(appt){ return function(){
+          sel.serviceId = appt.serviceId;
+          sel.barberId = appt.barberId;
+          sel.date = null;
+          sel.time = null;
+          reschedulingId = appt.id;
+          document.getElementById("custName").value = appt.customerName;
+          document.getElementById("custPhone").value = appt.customerPhone;
+          renderAll();
+          toast("Escolha o novo dia e horário e confirme para remarcar.");
+          var step3 = document.querySelectorAll("#cpanel-booking .step")[2];
+          if(step3) step3.scrollIntoView({behavior:"smooth", block:"start"});
+        };}(a));
         var cancelBtn = document.createElement("button");
         cancelBtn.className = "btn btn-danger";
         cancelBtn.textContent = "Cancelar";
         cancelBtn.addEventListener("click", function(id){ return function(){
-          a2ChangeStatus(id, "cancelado");
-          toast("Agendamento cancelado.");
+          showConfirm("Cancelar este agendamento?", function(){
+            a2ChangeStatus(id, "cancelado");
+            toast("Agendamento cancelado.");
+          });
         };}(a.id));
+        card.querySelector("div:last-child").appendChild(rescheduleBtn);
         card.querySelector("div:last-child").appendChild(cancelBtn);
       }
       list.appendChild(card);
@@ -1385,8 +1489,11 @@
     var barber = barberById(sel.barberId);
     var service = serviceById(sel.serviceId);
 
-    // final guard: re-check right before writing, in case this slot got taken
-    // (another tab, or the admin panel) while the form was being filled out.
+    // Quick local guard for instant feedback — the real, race-proof check
+    // happens inside the Firestore transaction below (commitAppointment),
+    // which re-checks against the latest data at the moment of writing so two
+    // people can't both grab the same slot even if they click within a second
+    // of each other.
     if(!slotAvailable(barber, sel.date, timeToMin(sel.time), service.duration)){
       toast("Esse horário acabou de ser preenchido — escolha outro, por favor.");
       sel.time = null;
@@ -1394,51 +1501,107 @@
       return;
     }
 
-    var appt = {
-      id: uid("a"), serviceId: sel.serviceId, barberId: sel.barberId, date: sel.date, time: sel.time,
-      customerName: name, customerPhone: phone, status: "confirmado", createdAt: Date.now(),
-      remind24Sent: false, remind2Sent: false
-    };
-    state.appointments.push(appt);
-    saveState(state);
+    var isReschedule = !!reschedulingId;
+    var oldId = reschedulingId;
+    var appt;
+    if(isReschedule){
+      var existing = state.appointments.find(function(x){ return x.id===oldId; });
+      if(existing){
+        appt = Object.assign({}, existing, {
+          serviceId: sel.serviceId, barberId: sel.barberId, date: sel.date, time: sel.time,
+          customerName: name, customerPhone: phone, status: "confirmado",
+          remind24Sent: false, remind2Sent: false, durationMin: service.duration
+        });
+      } else {
+        isReschedule = false; // the appointment vanished somehow — fall back to a fresh booking
+      }
+    }
+    if(!appt){
+      appt = {
+        id: uid("a"), serviceId: sel.serviceId, barberId: sel.barberId, date: sel.date, time: sel.time,
+        customerName: name, customerPhone: phone, status: "confirmado", createdAt: Date.now(),
+        remind24Sent: false, remind2Sent: false, durationMin: service.duration
+      };
+    }
 
-    var dateLabel = new Date(sel.date+"T00:00:00").toLocaleDateString("pt-BR", {day:"2-digit", month:"long"});
-    document.getElementById("confirmGrid").innerHTML =
-      confirmItem("Serviço", esc(service.name)) +
-      confirmItem("Profissional", esc(barber.name)) +
-      confirmItem("Data", dateLabel) +
-      confirmItem("Horário", appt.time, true) +
-      confirmItem("Cliente", esc(appt.customerName)) +
-      confirmItem("Código", appt.id.toUpperCase(), true);
-    document.getElementById("confirmBanner").classList.remove("hidden");
-    document.getElementById("lookupPhone").value = phone;
+    var btn = document.getElementById("btnConfirm");
+    btn.disabled = true;
 
-    var warningBox = document.getElementById("confirmWarning");
-    var warningText = document.getElementById("confirmWarningText");
-    warningBox.classList.remove("sent");
-    warningText.textContent = "Agendamento só será realizado se você confirmar por WhatsApp.";
+    function finalizeBooking(){
+      reschedulingId = null;
+      var dateLabel = new Date(sel.date+"T00:00:00").toLocaleDateString("pt-BR", {day:"2-digit", month:"long"});
+      document.getElementById("confirmGrid").innerHTML =
+        confirmItem("Serviço", esc(service.name)) +
+        confirmItem("Profissional", esc(barber.name)) +
+        confirmItem("Data", dateLabel) +
+        confirmItem("Horário", appt.time, true) +
+        confirmItem("Cliente", esc(appt.customerName)) +
+        confirmItem("Código", appt.id.toUpperCase(), true);
+      document.getElementById("confirmBanner").classList.remove("hidden");
+      document.getElementById("lookupPhone").value = phone;
 
-    document.getElementById("btnNotifyWhatsapp").onclick = function(){
-      var shopWa = waNumber(state.settings.whatsapp);
-      if(!shopWa){ toast("A barbearia ainda não configurou um WhatsApp em Configurações."); return; }
-      window.open("https://wa.me/"+shopWa+"?text="+encodeURIComponent(buildBookingMessage(appt)), "_blank");
-      warningBox.classList.add("sent");
-      warningText.textContent = "WhatsApp aberto — não esqueça de apertar enviar para garantir seu horário.";
-    };
-    document.getElementById("btnAddCalendar").onclick = function(){
-      window.open(buildGoogleCalendarUrl(appt), "_blank");
-    };
-    document.getElementById("btnNotifyEmail").onclick = function(){
-      var shopEmail = state.settings.email;
-      if(!shopEmail){ toast("A barbearia ainda não configurou um e-mail em Configurações."); return; }
-      window.location.href = "mailto:"+shopEmail+"?subject="+encodeURIComponent("Novo agendamento — "+appt.customerName)+"&body="+encodeURIComponent(buildBookingMessage(appt));
-    };
-    document.getElementById("notifyHint").textContent = "O WhatsApp abre com a mensagem pronta para revisar e enviar — como esta página não tem servidor, o envio em si é sempre um clique seu, nunca automático.";
-    sel = {serviceId:null, barberId:null, date:null, time:null};
-    document.getElementById("custName").value = "";
-    document.getElementById("custPhone").value = "";
-    toast("Horário reservado! Confirme por WhatsApp para garantir.");
-    renderAll();
+      var warningBox = document.getElementById("confirmWarning");
+      var warningText = document.getElementById("confirmWarningText");
+      warningBox.classList.remove("sent");
+      warningText.textContent = "Agendamento só será realizado se você confirmar por WhatsApp.";
+
+      document.getElementById("btnNotifyWhatsapp").onclick = function(){
+        var shopWa = waNumber(state.settings.whatsapp);
+        if(!shopWa){ toast("A barbearia ainda não configurou um WhatsApp em Configurações."); return; }
+        window.open("https://wa.me/"+shopWa+"?text="+encodeURIComponent(buildBookingMessage(appt, isReschedule)), "_blank");
+        warningBox.classList.add("sent");
+        warningText.textContent = "WhatsApp aberto — não esqueça de apertar enviar para garantir seu horário.";
+      };
+      document.getElementById("btnAddCalendar").onclick = function(){
+        window.open(buildGoogleCalendarUrl(appt), "_blank");
+      };
+      document.getElementById("btnNotifyEmail").onclick = function(){
+        var shopEmail = state.settings.email;
+        if(!shopEmail){ toast("A barbearia ainda não configurou um e-mail em Configurações."); return; }
+        window.location.href = "mailto:"+shopEmail+"?subject="+encodeURIComponent((isReschedule?"Agendamento remarcado — ":"Novo agendamento — ")+appt.customerName)+"&body="+encodeURIComponent(buildBookingMessage(appt, isReschedule));
+      };
+      document.getElementById("notifyHint").textContent = "O WhatsApp abre com a mensagem pronta para revisar e enviar — como esta página não tem servidor, o envio em si é sempre um clique seu, nunca automático.";
+      sel = {serviceId:null, barberId:null, date:null, time:null};
+      document.getElementById("custName").value = "";
+      document.getElementById("custPhone").value = "";
+      btn.disabled = false;
+      toast(isReschedule ? "Agendamento remarcado! Confirme por WhatsApp para garantir." : "Horário reservado! Confirme por WhatsApp para garantir.");
+      renderAll();
+    }
+
+    function localFallback(){
+      if(isReschedule){
+        var idx = state.appointments.findIndex(function(x){ return x.id===oldId; });
+        if(idx!==-1) state.appointments[idx] = appt; else state.appointments.push(appt);
+      } else {
+        state.appointments.push(appt);
+      }
+      saveState(state);
+      finalizeBooking();
+    }
+
+    if(window.__cloudSync && window.__cloudSync.ready && window.__cloudSync.commitAppointment){
+      window.__cloudSync.commitAppointment(appt, isReschedule, oldId).then(function(result){
+        // Only adopt the appointments list from the transaction — leave the
+        // rest of local state (e.g. product photos already merged in memory)
+        // untouched, since the transaction's snapshot doesn't carry those.
+        state.appointments = result.appointments;
+        try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
+        finalizeBooking();
+      }).catch(function(err){
+        if(err && err.message === "slot-taken"){
+          toast("Esse horário acabou de ser preenchido — escolha outro, por favor.");
+          sel.time = null;
+          btn.disabled = false;
+          renderAll();
+        } else {
+          console.warn("commitAppointment failed, saving locally instead", err);
+          localFallback();
+        }
+      });
+    } else {
+      localFallback();
+    }
   });
 
   document.getElementById("custName").addEventListener("input", renderSummary);
@@ -1691,11 +1854,17 @@
 
   function renderAgenda(){
     renderAdminDateRow();
+    var jumpInput = document.getElementById("adminJumpDate");
+    if(jumpInput) jumpInput.value = adminSelectedDate;
     var content = document.getElementById("agendaContent");
     content.innerHTML = "";
+    var selLabel = document.createElement("div");
+    selLabel.style.cssText = "font-size:0.85rem; color:var(--ink-soft); margin-bottom:12px;";
+    selLabel.textContent = new Date(adminSelectedDate+"T00:00:00").toLocaleDateString("pt-BR", {weekday:"long", day:"2-digit", month:"long", year:"numeric"});
+    content.appendChild(selLabel);
     var dayAppts = state.appointments.filter(function(a){ return a.date===adminSelectedDate; });
     if(dayAppts.length===0){
-      content.innerHTML = '<div class="empty-state">Nenhum agendamento neste dia.</div>';
+      content.appendChild(Object.assign(document.createElement("div"), {className:"empty-state", textContent:"Nenhum agendamento neste dia."}));
       return;
     }
     state.barbers.forEach(function(b){
@@ -1739,6 +1908,36 @@
       content.appendChild(group);
     });
   }
+
+  function exportAppointmentsCsv(){
+    var rows = [["Data","Horário","Cliente","Telefone","Serviço","Profissional","Status","Código"]];
+    state.appointments.slice().sort(function(a,b){ return (a.date+a.time) < (b.date+b.time) ? -1 : 1; }).forEach(function(a){
+      var s = serviceById(a.serviceId), b = barberById(a.barberId);
+      rows.push([a.date, a.time, a.customerName, a.customerPhone, s?s.name:"—", b?b.name:"—", labelStatus(a.status), a.id]);
+    });
+    var csv = rows.map(function(r){
+      return r.map(function(cell){
+        var v = String(cell==null?"":cell);
+        if(/[",;\n]/.test(v)) v = '"'+v.replace(/"/g,'""')+'"';
+        return v;
+      }).join(";");
+    }).join("\r\n");
+    var blob = new Blob(["﻿"+csv], {type:"text/csv;charset=utf-8;"});
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement("a");
+    link.href = url;
+    link.download = "hilarios-agendamentos-"+todayStr()+".csv";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+    toast("CSV exportado com "+(rows.length-1)+" agendamento(s).");
+  }
+  document.getElementById("adminJumpDate").addEventListener("change", function(e){
+    adminSelectedDate = e.target.value || todayStr();
+    renderAgenda();
+  });
+  document.getElementById("btnExportCsv").addEventListener("click", exportAppointmentsCsv);
 
   function actionBtn(label, fn){
     var btn = document.createElement("button");
@@ -1786,10 +1985,12 @@
         tbody.appendChild(tr);
         var td = tr.querySelector(".row-actions");
         td.appendChild(actionBtn("Editar", function(id){ return function(){ editingServiceId = id; renderAdmin(); }; }(s.id)));
-        td.appendChild(actionBtn("Excluir", function(id){ return function(){
-          state.services = state.services.filter(function(x){return x.id!==id;});
-          saveState(state); renderAll(); toast("Serviço removido.");
-        };}(s.id)));
+        td.appendChild(actionBtn("Excluir", function(id, name){ return function(){
+          showConfirm('Excluir o serviço "'+name+'"? Essa ação não pode ser desfeita.', function(){
+            state.services = state.services.filter(function(x){return x.id!==id;});
+            saveState(state); renderAll(); toast("Serviço removido.");
+          });
+        };}(s.id, s.name)));
       }
     });
   }
@@ -1843,15 +2044,60 @@
       hoursRow.querySelector("#bstart-"+b.id).addEventListener("change", function(id){ return function(e){ barberById(id).start = e.target.value; saveState(state); renderAll(); }; }(b.id));
       hoursRow.querySelector("#bend-"+b.id).addEventListener("change", function(id){ return function(e){ barberById(id).end = e.target.value; saveState(state); renderAll(); }; }(b.id));
 
+      var blockRow = document.createElement("div");
+      blockRow.className = "field";
+      blockRow.style.marginTop = "12px";
+      blockRow.innerHTML =
+        '<label>Bloquear um dia (folga, feriado, imprevisto)</label>'+
+        '<div style="display:flex; gap:8px; flex-wrap:wrap;">'+
+          '<input type="date" id="blockDate-'+b.id+'" style="flex:1; min-width:150px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink);">'+
+          '<button type="button" class="btn btn-ghost btn-small" id="btnBlockDate-'+b.id+'">Bloquear dia</button>'+
+        '</div>'+
+        '<div class="blocked-dates-list" id="blockedList-'+b.id+'"></div>';
+      card.appendChild(blockRow);
+      function renderBlockedDates(){
+        var list = blockRow.querySelector("#blockedList-"+b.id);
+        list.innerHTML = "";
+        if(!b.blockedDates || b.blockedDates.length===0){
+          list.innerHTML = '<span style="font-size:0.78rem; color:var(--ink-faint);">Nenhum dia bloqueado.</span>';
+          return;
+        }
+        b.blockedDates.slice().sort().forEach(function(ds){
+          var dt = new Date(ds+"T00:00:00");
+          var label = pad(dt.getDate())+"/"+pad(dt.getMonth()+1)+"/"+dt.getFullYear();
+          var pill = document.createElement("span");
+          pill.className = "blocked-date-pill";
+          pill.innerHTML = '<span>'+label+'</span> <button type="button" title="Desbloquear" aria-label="Desbloquear '+label+'">×</button>';
+          pill.querySelector("button").addEventListener("click", function(){
+            b.blockedDates = b.blockedDates.filter(function(x){return x!==ds;});
+            saveState(state); renderAll();
+          });
+          list.appendChild(pill);
+        });
+      }
+      renderBlockedDates();
+      blockRow.querySelector("#btnBlockDate-"+b.id).addEventListener("click", function(){
+        var input = blockRow.querySelector("#blockDate-"+b.id);
+        var ds = input.value;
+        if(!ds){ toast("Escolha uma data para bloquear."); return; }
+        if(!b.blockedDates) b.blockedDates = [];
+        if(b.blockedDates.indexOf(ds)===-1) b.blockedDates.push(ds);
+        input.value = "";
+        saveState(state); renderAll();
+        toast("Dia bloqueado.");
+      });
+
       var delRow = document.createElement("div");
       delRow.style.marginTop = "12px";
       var delBtn = document.createElement("button");
       delBtn.className = "btn btn-danger";
       delBtn.textContent = "Remover barbeiro";
-      delBtn.addEventListener("click", function(id){ return function(){
-        state.barbers = state.barbers.filter(function(x){return x.id!==id;});
-        saveState(state); renderAll(); toast("Barbeiro removido.");
-      };}(b.id));
+      delBtn.addEventListener("click", function(id, name){ return function(){
+        showConfirm('Remover o barbeiro "'+name+'"? Agendamentos já existentes dele não serão apagados, mas ele deixa de aparecer para novos agendamentos. Essa ação não pode ser desfeita.', function(){
+          state.barbers = state.barbers.filter(function(x){return x.id!==id;});
+          saveState(state); renderAll(); toast("Barbeiro removido.");
+        });
+      };}(b.id, b.name));
       delRow.appendChild(delBtn);
       card.appendChild(delRow);
 
@@ -1865,7 +2111,7 @@
     var start = document.getElementById("newBarberStart").value || "09:00";
     var end = document.getElementById("newBarberEnd").value || "19:00";
     if(!name){ toast("Informe o nome do barbeiro."); return; }
-    state.barbers.push({id:uid("b"), name:name, specialty:spec, workDays:[2,3,4,5,6], start:start, end:end, lunchStart:"12:00", lunchEnd:"13:00"});
+    state.barbers.push({id:uid("b"), name:name, specialty:spec, workDays:[2,3,4,5,6], start:start, end:end, lunchStart:"12:00", lunchEnd:"13:00", blockedDates:[]});
     saveState(state);
     document.getElementById("newBarberName").value = "";
     document.getElementById("newBarberSpec").value = "";
@@ -1934,10 +2180,12 @@
         tbody.appendChild(tr);
         var td = tr.querySelector(".row-actions");
         td.appendChild(actionBtn("Editar", function(id){ return function(){ editingClientId = id; renderAdmin(); }; }(c.id)));
-        td.appendChild(actionBtn("Excluir", function(id){ return function(){
-          state.clients = state.clients.filter(function(x){return x.id!==id;});
-          saveState(state); renderAll(); toast("Cliente removido.");
-        };}(c.id)));
+        td.appendChild(actionBtn("Excluir", function(id, name){ return function(){
+          showConfirm('Excluir o cliente "'+name+'"? Essa ação não pode ser desfeita.', function(){
+            state.clients = state.clients.filter(function(x){return x.id!==id;});
+            saveState(state); renderAll(); toast("Cliente removido.");
+          });
+        };}(c.id, c.name)));
       }
     });
   }
@@ -2001,11 +2249,13 @@
       var delBtn = document.createElement("button");
       delBtn.className = "btn btn-danger";
       delBtn.textContent = "Remover plano";
-      delBtn.addEventListener("click", function(id){ return function(){
-        state.plans = state.plans.filter(function(x){return x.id!==id;});
-        state.clients.forEach(function(c){ if(c.planId===id) c.planId = null; });
-        saveState(state); renderAll(); toast("Plano removido.");
-      };}(p.id));
+      delBtn.addEventListener("click", function(id, name){ return function(){
+        showConfirm('Remover o plano "'+name+'"? Clientes com esse plano ativo ficarão sem plano. Essa ação não pode ser desfeita.', function(){
+          state.plans = state.plans.filter(function(x){return x.id!==id;});
+          state.clients.forEach(function(c){ if(c.planId===id) c.planId = null; });
+          saveState(state); renderAll(); toast("Plano removido.");
+        });
+      };}(p.id, p.name));
       delRow.appendChild(delBtn);
       card.appendChild(delRow);
 
@@ -2094,10 +2344,12 @@
       var delBtn = document.createElement("button");
       delBtn.className = "btn btn-danger";
       delBtn.textContent = "Excluir produto";
-      delBtn.addEventListener("click", function(id){ return function(){
-        state.products = state.products.filter(function(x){return x.id!==id;});
-        saveState(state); renderAll(); toast("Produto removido.");
-      };}(p.id));
+      delBtn.addEventListener("click", function(id, price){ return function(){
+        showConfirm('Excluir este produto ('+currency(price)+')? Essa ação não pode ser desfeita.', function(){
+          state.products = state.products.filter(function(x){return x.id!==id;});
+          saveState(state); renderAll(); toast("Produto removido.");
+        });
+      };}(p.id, p.price));
       card.appendChild(delBtn);
     });
   }
@@ -2153,22 +2405,38 @@
   renderAll();
 
   // ---------- cloud sync (Firebase) ----------
-  // Pulls the latest saved state from the cloud once, on open, so every
-  // device/browser starts from the same data. Every saveState() call already
-  // pushes up to the cloud (see saveState above) — this only handles the
-  // "coming in" direction.
-  function trySyncFromCloud(){
-    if(!(window.__cloudSync && window.__cloudSync.ready)) return;
-    window.__cloudSync.load().then(function(remote){
-      if(remote){
-        state = remote;
-        try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
-        renderAll();
-      }
-    });
+  // Keeps a LIVE connection to the cloud data for as long as the page stays
+  // open — a browser left open all day (e.g. the admin panel) no longer works
+  // off the stale snapshot it had at load time, which previously meant a
+  // later save() could silently overwrite bookings made elsewhere in between.
+  // While someone is actively typing in a field, an incoming update is held
+  // back (so it can't yank the field out from under them) and applied as
+  // soon as they click away.
+  var pendingRemoteRender = false;
+  function isTypingInField(){
+    var ae = document.activeElement;
+    return !!(ae && (ae.tagName==="INPUT" || ae.tagName==="TEXTAREA" || ae.tagName==="SELECT"));
   }
-  if(window.__cloudSync && window.__cloudSync.ready) trySyncFromCloud();
-  else window.addEventListener("cloudSyncReady", trySyncFromCloud, {once:true});
+  function applyRemoteState(remote){
+    if(!remote) return;
+    state = remote;
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
+    if(isTypingInField()){ pendingRemoteRender = true; return; }
+    renderAll();
+  }
+  document.addEventListener("focusout", function(){
+    if(pendingRemoteRender && !isTypingInField()){
+      pendingRemoteRender = false;
+      renderAll();
+    }
+  }, true);
+  function startCloudSync(){
+    if(!(window.__cloudSync && window.__cloudSync.ready)) return;
+    if(window.__cloudSync.subscribeState) window.__cloudSync.subscribeState(applyRemoteState);
+    else if(window.__cloudSync.load) window.__cloudSync.load().then(applyRemoteState);
+  }
+  if(window.__cloudSync && window.__cloudSync.ready) startCloudSync();
+  else window.addEventListener("cloudSyncReady", startCloudSync, {once:true});
 })();
 </script>
 
@@ -2176,7 +2444,7 @@
   // Cloud database (Firebase) — keeps products, serviços, clientes, planos e
   // agendamentos sincronizados entre todos os aparelhos que abrirem este link.
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-  import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+  import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot, runTransaction } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
   var firebaseConfig = {
     apiKey: "AIzaSyBdID6YGgasQkR9puVy0rhXX4ZjTJ2LFCY",
@@ -2241,6 +2509,53 @@
           console.warn("cloud save failed", e);
           return Promise.resolve();
         }
+      },
+      // Keeps `state` fresh while the page stays open — without this, a browser
+      // left open all day only ever sees the data it had at load time, and any
+      // later save() would overwrite whatever clients booked in the meantime.
+      subscribeState: function(cb){
+        try{
+          return onSnapshot(stateRef, function(snap){
+            if(!snap.exists()){ cb(null); return; }
+            var payload = snap.data().payload;
+            if(!payload){ cb(null); return; }
+            getDocs(photosCol).then(function(photoSnap){
+              var photoMap = {};
+              photoSnap.forEach(function(d){ photoMap[d.id] = d.data().photo; });
+              (payload.products || []).forEach(function(p){ if(photoMap[p.id]) p.photo = photoMap[p.id]; });
+              cb(payload);
+            }).catch(function(){ cb(payload); });
+          }, function(err){ console.warn("cloud subscribe failed", err); });
+        }catch(e){ console.warn("cloud subscribe failed", e); return function(){}; }
+      },
+      // Atomically checks the slot is still free (against the LATEST data in
+      // Firestore, not just what this browser loaded earlier) and writes the
+      // appointment in the same transaction — closes the gap where two clients
+      // booking at nearly the same moment could both land on the same slot.
+      commitAppointment: function(appt, isReschedule, oldId){
+        function toMin(t){ var p = t.split(":"); return parseInt(p[0],10)*60 + parseInt(p[1],10); }
+        return runTransaction(db, function(tx){
+          return tx.get(stateRef).then(function(snap){
+            var payload = snap.exists() ? snap.data().payload : null;
+            if(!payload) throw new Error("no-remote-state");
+            var appts = payload.appointments || [];
+            var conflict = appts.some(function(a){
+              if(a.status === "cancelado") return false;
+              if(a.barberId !== appt.barberId || a.date !== appt.date) return false;
+              if(isReschedule && a.id === oldId) return false;
+              var s = toMin(a.time), e = s + (a.durationMin || 30);
+              var ns = toMin(appt.time), ne = ns + (appt.durationMin || 30);
+              return ns < e && s < ne;
+            });
+            if(conflict){ throw new Error("slot-taken"); }
+            var updated = isReschedule
+              ? appts.map(function(a){ return a.id === oldId ? appt : a; })
+              : appts.concat([appt]);
+            var newPayload = Object.assign({}, payload, { appointments: updated });
+            tx.set(stateRef, { payload: newPayload, updatedAt: Date.now() });
+            return newPayload;
+          });
+        });
       }
     };
   }catch(e){
